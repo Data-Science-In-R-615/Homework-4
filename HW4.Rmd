@@ -1,0 +1,132 @@
+---
+title: "HW4"
+author: "Vajinder"
+date: "2024-09-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(zoo)
+library(tibble)
+```
+
+Your first exercise is to read in the data for all the years from 1985 to 2023. As discussed
+in class, you don’t want to do this manually and will need to figure out a way to do it
+programmatically. We’ve given you a skeleton of how to do this for data for one year below.
+Your task is to adapt this to reading in multiple datasets from all the years in question. This
+example code is meant to be a guide and if you think of a better way to read the data in, go
+for it.
+Keep in mind that initially, these datasets did not record units and then started to do so in
+the line below the column headers. So for some years you will have to skip 1 instead of 2.
+In addition to reading in this data, use lubridate to create a proper date column.
+
+```{r}
+library(data.table)
+library(lubridate)
+
+file_root <- "https://www.ndbc.noaa.gov/view_text_file.php?filename=44013h"
+tail <- ".txt.gz&dir=data/historical/stdmet/"
+
+load_buoy_data <- function(year) {
+  path <- paste0(file_root, year, tail)
+  
+  
+  if (year < 2007) {
+  header <- scan(path, what = 'character', nlines = 1)
+  buoy <- read.table(path, fill = TRUE, header = TRUE, sep = "")
+  buoy <- add_column(buoy, mm = NA, .after = "hh")
+  buoy <- add_column(buoy, TIDE = NA, .after = "VIS")
+    
+  } else {
+  header <- scan(path, what = 'character', nlines = 1)  
+  buoy <- fread(path, header = FALSE, skip = 1, fill = TRUE)
+
+    setnames(buoy, header)
+  }
+  
+  return(buoy)
+}
+
+all_data <- lapply(1985:2023, load_buoy_data)
+
+combined_data <- rbindlist(all_data, fill = TRUE)
+
+print(summary(combined_data))
+
+```
+Your next exercise is to identify and deal with the null data in the dataset.Recall from class
+that for WDIR and some other variables these showed up as 999 in the dataset. Convert them
+to NA’s. Is it always appropriate to convert missing/null data to NA’s? When might it not
+be? Analyze the pattern of NA’s. Do you spot any patterns in the way/dates that these are
+distributed?
+
+
+```{r}
+combined_data <- combined_data %>%
+  mutate(
+    YY = as.character(YY),
+    `#YY` = as.character(`#YY`),
+    YYYY = as.character(YYYY)
+  )
+
+# Combine year columns safely using coalesce
+combined_data <- combined_data %>%
+  mutate(YYYY = coalesce(YYYY, `#YY`, YY))
+combined_data <- combined_data %>%
+  mutate(BAR = coalesce(as.numeric(BAR), as.numeric(PRES)),  # Convert BAR and PRES to numeric
+    WD = coalesce(as.numeric(WD), as.numeric(WDIR)))
+
+combined_data <- combined_data %>%
+  select(-TIDE, -TIDE.1, -mm.1,- WDIR, -PRES,-`#YY`,-YY)
+
+combined_data$datetime <- ymd_h(paste(combined_data$YYYY, combined_data$MM, combined_data$DD, combined_data$hh, sep = "-"))
+
+combined_data <- combined_data %>%
+  mutate(across(everything(), 
+                ~ na_if(as.numeric(as.character(.)), 99) %>%
+                na_if(999) %>%
+                na_if(9999)))
+
+summary(combined_data)
+str(combined_data)
+```
+
+
+```{r}
+# Time Series Plot
+ggplot(combined_data, aes(x = datetime, y = WTMP)) +
+  geom_line(color = "blue") +
+  labs(title = "Time Series of Water Temperature", x = "Date", y = "Temperature (°C)") +
+  theme_minimal()
+
+# Box Plot
+ggplot(combined_data, aes(x = factor(YYYY), y = WTMP)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of Water Temperature by Year", x = "Year", y = "Temperature (°C)") +
+  theme_minimal()
+
+# Scatter Plot
+ggplot(combined_data, aes(x = WSPD, y = WTMP)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Scatter Plot of Wind Speed vs. Water Temperature", x = "Wind Speed (m/s)", y = "Temperature (°C)") +
+  theme_minimal()
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
