@@ -17,6 +17,7 @@ library(lubridate)
 library(ggplot2)
 library(zoo)
 library(tibble)
+library(readr)
 ```
 
 Your first exercise is to read in the data for all the years from 1985 to 2023. As discussed
@@ -30,9 +31,6 @@ the line below the column headers. So for some years you will have to skip 1 ins
 In addition to reading in this data, use lubridate to create a proper date column.
 
 ```{r}
-library(data.table)
-library(lubridate)
-
 file_root <- "https://www.ndbc.noaa.gov/view_text_file.php?filename=44013h"
 tail <- ".txt.gz&dir=data/historical/stdmet/"
 
@@ -53,22 +51,32 @@ load_buoy_data <- function(year) {
     setnames(buoy, header)
   }
   
-  return(buoy)
+  #return(buoy)
 }
 
 all_data <- lapply(1985:2023, load_buoy_data)
 
 combined_data <- rbindlist(all_data, fill = TRUE)
-
-print(summary(combined_data))
-
 ```
 Your next exercise is to identify and deal with the null data in the dataset.Recall from class
 that for WDIR and some other variables these showed up as 999 in the dataset. Convert them
-to NA’s. Is it always appropriate to convert missing/null data to NA’s? When might it not
-be? Analyze the pattern of NA’s. Do you spot any patterns in the way/dates that these are
+to NA’s. Is it always appropriate to convert missing/null data to NA’s?
+
+Sometimes, we can use mean or average instead of NA and sometimes, Regression models can be used in order to predict nearest possible value instead of using NAs
+
+When might it not be?
+Sometimes, For example in Buoy, We might get so many NAs that we won't have much of data to get information from. Additionally, Sometimes adding NAs might give us wrong information as well. In other words, sometimes 0 or TRUE/FALSE are better than NA.  
+
+Analyze the pattern of NA’s. Do you spot any patterns in the way/dates that these are
 distributed?
 
+A lot of NAs in the beginning that almost forces us to see the summary if it is all NA. But it starts showing improvement after 2015s which I believe is due to investment on to resources to get the information more. On enquiring in depth, I got the following info regardnig the trends of funding which matched somewhat with the NA trend we see in the data:
+From 1985 - Mid 2000s: Funding was stable but not enough as they started looking for more resources and investments to improve technology. 
+Mid to Late 2000s: Funding levels experienced some fluctuations due to budgetary constraints and changing federal priorities. Despite these challenges, there was ongoing investment in advanced technologies, including remote sensing and automated data collection systems, which are crucial for climate monitoring
+
+2010s to Present: The trend has seen increased funding as awareness of climate change has risen. New collaborations with private companies and research institutions have also emerged, aiming to develop innovative marine observation technologies. Projects like the partnership with Saildrone to replace moored buoys indicate a shift towards sustainable and efficient monitoring methods
+
+Government Shutdowns and financial crisis: Notable government shutdowns can significantly affect funding. For example,2008 financial crisis, the 2013 shutdown, lasting 16 days, and the one in late 2018 to early 2019 had substantial impacts on various government agencies, including those involved in climate and ocean data collection. During these periods, funding was halted, leading to delays in projects and a reevaluation of budgets.
 
 ```{r}
 combined_data <- combined_data %>%
@@ -96,17 +104,20 @@ combined_data <- combined_data %>%
                 na_if(999) %>%
                 na_if(9999)))
 
-summary(combined_data)
-str(combined_data)
+#summary(combined_data)
+#str(combined_data)
+#str(combined_data$datetime)
+if (!inherits(combined_data$datetime, "POSIXct")) {
+  combined_data$datetime <- ymd_h(paste(combined_data$YYYY, combined_data$MM, combined_data$DD, combined_data$hh, sep = "-"))
+}
 ```
 
+Can you use the Buoy data to see the effects of climate change? Create visualizations to
+show this and justify your choices. Can you think of statistics you can use to bolster what
+your plots represent? Calculate these, justify your use of them. Add this code, its output,
+your answers and visualizations to your pdf.
 
 ```{r}
-# Time Series Plot
-ggplot(combined_data, aes(x = datetime, y = WTMP)) +
-  geom_line(color = "blue") +
-  labs(title = "Time Series of Water Temperature", x = "Date", y = "Temperature (°C)") +
-  theme_minimal()
 
 # Box Plot
 ggplot(combined_data, aes(x = factor(YYYY), y = WTMP)) +
@@ -119,14 +130,95 @@ ggplot(combined_data, aes(x = WSPD, y = WTMP)) +
   geom_point(alpha = 0.5) +
   labs(title = "Scatter Plot of Wind Speed vs. Water Temperature", x = "Wind Speed (m/s)", y = "Temperature (°C)") +
   theme_minimal()
+
+
+```
+
+```{r}
+
+combined_data$WTMP <- as.numeric(combined_data$WTMP)
+
+yearly_temp_stats <- combined_data %>%
+  group_by(year = year(datetime)) %>%
+  summarise(
+    min_temp = min(WTMP, na.rm = TRUE),
+    max_temp = max(WTMP, na.rm = TRUE)
+  )
+
+ggplot(yearly_temp_stats, aes(x = year)) +
+  geom_point(aes(y = min_temp), color = "blue") +   # Scatter plot for min temp
+  geom_line(aes(y = min_temp), color = "blue", size = 1) + # Line for min temp
+  geom_point(aes(y = max_temp), color = "red") +     # Scatter plot for max temp
+  geom_line(aes(y = max_temp), color = "red", size = 1) + # Line for max temp
+  labs(title = "Yearly Minimum and Maximum Temperatures from 1985-2023",
+       x = "Year",
+       y = "Temperature (°C)",
+       color = "Legend") +
+  theme_minimal() +     
+  scale_color_manual(values = c("Min Temperature" = "blue", "Max Temperature" = "red")) +
+  scale_y_continuous(breaks = seq(min(yearly_temp_stats$min_temp, na.rm = TRUE), 
+                                   max(yearly_temp_stats$max_temp, na.rm = TRUE), 
+                                   by = 5)) 
+
+yearly_temp_stats <- combined_data %>%
+  group_by(year = year(datetime)) %>%
+  summarise(
+    min_temp = min(WTMP, na.rm = TRUE),
+    max_temp = max(WTMP, na.rm = TRUE),
+    mean_temp = mean(WTMP, na.rm = TRUE),
+    sd_temp = sd(WTMP, na.rm = TRUE),
+    p25_temp = quantile(WTMP, 0.25, na.rm = TRUE),
+    p75_temp = quantile(WTMP, 0.75, na.rm = TRUE)
+  )
+trend_model <- lm(mean_temp ~ year, data = yearly_temp_stats)
+summary(trend_model)
+
+```
+
+Even though the model tells about 38% variability explained by year on the mean temperature but it still gives us small evidence of global warming over the time. Min temprature can be seen having increase over the time from the graph as well.
+
+```{r}
+rainfall_data <- read_csv("rainfall.csv")
+
+glimpse(rainfall_data)
+glimpse(combined_data)
+
+rainfall_data <- rainfall_data %>%
+  filter(!is.na(HPCP) & !is.na(DATE))
 ```
 
 
 ```{r}
+rainfall_data %>%
+  mutate(year = year(DATE)) %>%
+  group_by(year) %>%
+  summarise(total_rainfall = sum(HPCP, na.rm = TRUE)) %>%
+  ggplot(aes(x = year, y = total_rainfall)) +
+  geom_line() +
+  labs(title = "Total Yearly Rainfall in Boston (1985-2013)", x = "Year", y = "Total Rainfall (mm)")
 
+yearly_avg_temp <- combined_data %>%
+  mutate(year = factor(YYYY)) %>%  # Ensure year is a factor for plotting
+  group_by(year) %>%
+  summarise(avg_WTMP = mean(WTMP, na.rm = TRUE))
+
+ggplot(yearly_avg_temp, aes(x = year, y = avg_WTMP)) +
+  geom_point(color = "blue") +           
+  labs(title = "Average Water Temperature by Year (1985-2023)",
+       x = "Year",
+       y = "Average Temperature (°C)") +
+  theme_minimal()
 ```
 
-
+I tried all the three types of model with WTMP, BAR and log model, but neither of them are covering much of variability whereas visualization tells different story as the pattern or rather the line have similar shape if we observe that gave me idea that there might be some relationship between rainfall and Water temperature but model shows something else. This shows that there might be some other variables that can help explain more which I will explore more in depth. 
 ```{r}
+library(rstanarm)
+combined_data$datetime <- as.POSIXct(combined_data$datetime)
+rainfall_data$datetime <- as.POSIXct(rainfall_data$datetime)
 
+rainfall_data$datetime <- ymd_h(rainfall_data$DATE)
+comb_data <- left_join(combined_data, rainfall_data, by = "datetime")
+model <- stan_glm(HPCP ~ BAR + WTMP + BAR*WTMP, data = comb_data, refresh = 0)
+summary(model)
 ```
+
